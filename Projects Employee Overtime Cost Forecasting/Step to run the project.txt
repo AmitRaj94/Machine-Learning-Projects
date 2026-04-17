@@ -1,0 +1,13 @@
+STEP 1
+	copy the file path of the "requrements.txt"
+STEP 2
+	open cmd 
+Step 3
+	it will look like - PS D:\project>
+	type -> cd "file path"
+step 4		
+	enter -> python -m venv .venv
+	enter -> .venv/Scripts/Activate.ps1
+	enter -> pip install -r requirements.txt
+	enter -> streamlit run app.py
+	
