@@ -40,7 +40,6 @@ def load_data():
 def load_model():
     BASE_DIR = os.path.dirname(os.path.abspath(__file__))
     model_path = os.path.join(BASE_DIR, "downtime_model.pkl")
-
     return joblib.load(model_path)
 
 df = load_data()
@@ -70,17 +69,36 @@ st.title("🏭 Smart Manufacturing Downtime Risk Dashboard")
 # =========================
 st.sidebar.header("🔧 Machine Inputs")
 
-air_temp = st.sidebar.slider("Air Temperature", float(df['Air temperature [K]'].min()), float(df['Air temperature [K]'].max()))
-process_temp = st.sidebar.slider("Process Temperature", float(df['Process temperature [K]'].min()), float(df['Process temperature [K]'].max()))
-rpm = st.sidebar.slider("Rotational Speed", int(df['Rotational speed [rpm]'].min()), int(df['Rotational speed [rpm]'].max()))
-torque = st.sidebar.slider("Torque", float(df['Torque [Nm]'].min()), float(df['Torque [Nm]'].max()))
-tool_wear = st.sidebar.slider("Tool Wear", int(df['Tool wear [min]'].min()), int(df['Tool wear [min]'].max()))
+air_temp = st.sidebar.slider("Air Temperature",
+                             float(df['Air temperature [K]'].min()),
+                             float(df['Air temperature [K]'].max()))
+
+process_temp = st.sidebar.slider("Process Temperature",
+                                 float(df['Process temperature [K]'].min()),
+                                 float(df['Process temperature [K]'].max()))
+
+rpm = st.sidebar.slider("Rotational Speed",
+                        int(df['Rotational speed [rpm]'].min()),
+                        int(df['Rotational speed [rpm]'].max()))
+
+torque = st.sidebar.slider("Torque",
+                           float(df['Torque [Nm]'].min()),
+                           float(df['Torque [Nm]'].max()))
+
+tool_wear = st.sidebar.slider("Tool Wear",
+                              int(df['Tool wear [min]'].min()),
+                              int(df['Tool wear [min]'].max()))
 
 type_map = {'L': 0, 'M': 1, 'H': 2}
 type_input = st.sidebar.selectbox("Machine Type", list(type_map.keys()))
 machine_type = type_map[type_input]
 
-selected_types = st.sidebar.multiselect("Machine Type Filter", list(type_map.keys()), default=list(type_map.keys()))
+selected_types = st.sidebar.multiselect(
+    "Machine Type Filter",
+    list(type_map.keys()),
+    default=list(type_map.keys())
+)
+
 selected_failure = st.sidebar.multiselect(
     "Failure Status",
     [0, 1],
@@ -121,7 +139,10 @@ if filtered_df.empty:
     st.warning("No data for selected filters. Showing full dataset.")
     filtered_df = df.copy()
 
-filtered_df['Failure_label'] = filtered_df['Machine failure'].map({0: 'No Failure', 1: 'Failure'})
+filtered_df['Failure_label'] = filtered_df['Machine failure'].map({
+    0: 'No Failure',
+    1: 'Failure'
+})
 
 # =========================
 # PREDICTION
@@ -134,7 +155,10 @@ prob = model.predict_proba(input_df)[0][1]
 col1, col2 = st.columns(2)
 
 with col1:
-    st.error("⚠ High Risk") if prediction else st.success("✅ Low Risk")
+    if prediction == 1:
+        st.error("⚠ High Risk")
+    else:
+        st.success("✅ Low Risk")
 
 with col2:
     st.metric("Failure Probability", f"{prob:.2%}")
@@ -177,7 +201,11 @@ st.plotly_chart(fig2, use_container_width=True)
 # =========================
 corr = filtered_df[feature_cols + ['Machine failure']].corr()
 
-fig_corr = px.imshow(corr, text_auto=True, color_continuous_scale=selected_palette)
+fig_corr = px.imshow(
+    corr,
+    text_auto=True,
+    color_continuous_scale=selected_palette
+)
 st.plotly_chart(fig_corr, use_container_width=True)
 
 # =========================
@@ -190,7 +218,11 @@ try:
     X_sample = df[feature_cols].sample(min(shap_sample_size, len(df)))
 
     shap_values = explainer.shap_values(X_sample)
-    shap_vals = shap_values[1] if isinstance(shap_values, list) else shap_values
+
+    if isinstance(shap_values, list):
+        shap_vals = shap_values[1]
+    else:
+        shap_vals = shap_values
 
     importance = np.mean(np.abs(shap_vals), axis=0)
 
@@ -199,7 +231,15 @@ try:
         'Importance': importance
     }).sort_values(by='Importance')
 
-    fig_shap = px.bar(shap_df, x='Importance', y='Feature', orientation='h')
+    fig_shap = px.bar(
+        shap_df,
+        x='Importance',
+        y='Feature',
+        orientation='h',
+        color='Importance',
+        color_continuous_scale=selected_palette
+    )
+
     st.plotly_chart(fig_shap, use_container_width=True)
 
 except Exception as e:
