@@ -10,16 +10,12 @@ import shap
 # CONFIG
 # =========================
 st.set_page_config(page_title="Downtime Risk Dashboard", layout="wide")
-# 1. Use the Direct Download format for Google Drive
-file_id = "1jmE2F88aXODeUO8FBMZhqAWrOUv1Akxe"
-drive_url = f"https://drive.google.com/uc?export=download&id={file_id}"
-
 # =========================
 # LOAD DATA (FIXED)
 # =========================
 @st.cache_data
 def load_data():
-    df = pd.read_csv(drive_url)
+    df = pd.read_csv("data1.csv")
 
     # Drop unnecessary columns
     df = df.drop(columns=['TWF', 'HDF', 'PWF', 'OSF', 'RNF'], errors='ignore')
