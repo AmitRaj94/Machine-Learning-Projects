@@ -34,16 +34,21 @@ def load_data():
     return df
 
 # =========================
-# LOAD MODEL
+# LOAD MODEL + SCALER
 # =========================
 @st.cache_resource
-def load_model():
+def load_artifacts():
     base_dir = os.path.dirname(os.path.abspath(__file__))
-    model_path = os.path.join(base_dir, "downtime_model.pkl")
-    return joblib.load(model_path)
+
+    model = joblib.load(os.path.join(base_dir, "downtime_model.pkl"))
+
+    scaler_path = os.path.join(base_dir, "scaler.pkl")
+    scaler = joblib.load(scaler_path) if os.path.exists(scaler_path) else None
+
+    return model, scaler
 
 df = load_data()
-model = load_model()
+model, scaler = load_artifacts()
 
 # =========================
 # FEATURES
@@ -69,42 +74,31 @@ st.title("🏭 Smart Manufacturing Downtime Risk Dashboard")
 # =========================
 st.sidebar.header("🔧 Machine Inputs")
 
-air_temp = st.sidebar.slider("Air Temperature",
-    float(df['Air temperature [K]'].min()),
-    float(df['Air temperature [K]'].max()))
+def safe_slider(label, series):
+    return st.sidebar.slider(
+        label,
+        float(series.min()),
+        float(series.max()),
+        float(series.mean())
+    )
 
-process_temp = st.sidebar.slider("Process Temperature",
-    float(df['Process temperature [K]'].min()),
-    float(df['Process temperature [K]'].max()))
-
+air_temp = safe_slider("Air Temperature", df['Air temperature [K]'])
+process_temp = safe_slider("Process Temperature", df['Process temperature [K]'])
 rpm = st.sidebar.slider("Rotational Speed",
-    int(df['Rotational speed [rpm]'].min()),
-    int(df['Rotational speed [rpm]'].max()))
+                        int(df['Rotational speed [rpm]'].min()),
+                        int(df['Rotational speed [rpm]'].max()),
+                        int(df['Rotational speed [rpm]'].mean()))
 
-torque = st.sidebar.slider("Torque",
-    float(df['Torque [Nm]'].min()),
-    float(df['Torque [Nm]'].max()))
+torque = safe_slider("Torque", df['Torque [Nm]'])
 
 tool_wear = st.sidebar.slider("Tool Wear",
-    int(df['Tool wear [min]'].min()),
-    int(df['Tool wear [min]'].max()))
+                              int(df['Tool wear [min]'].min()),
+                              int(df['Tool wear [min]'].max()),
+                              int(df['Tool wear [min]'].mean()))
 
 type_map = {'L': 0, 'M': 1, 'H': 2}
 type_input = st.sidebar.selectbox("Machine Type", list(type_map.keys()))
 machine_type = type_map[type_input]
-
-selected_types = st.sidebar.multiselect(
-    "Machine Types",
-    list(type_map.keys()),
-    default=list(type_map.keys())
-)
-
-selected_failure = st.sidebar.multiselect(
-    "Failure Status",
-    [0, 1],
-    default=[0, 1],
-    format_func=lambda x: "Failure" if x == 1 else "No Failure"
-)
 
 # =========================
 # INPUT FEATURES
@@ -112,41 +106,46 @@ selected_failure = st.sidebar.multiselect(
 temp_diff = process_temp - air_temp
 load = torque * rpm
 
-input_df = pd.DataFrame([[
+input_df = pd.DataFrame([[ 
     air_temp, process_temp, rpm, torque,
     tool_wear, machine_type, temp_diff, load
 ]], columns=feature_cols)
 
 # =========================
-# FILTER DATA
+# ⚠ OUT-OF-DISTRIBUTION CHECK
 # =========================
-filtered_df = df[
-    df['Type'].isin([type_map[t] for t in selected_types]) &
-    df['Machine failure'].isin(selected_failure)
-].copy()
+if (
+    (input_df < df[feature_cols].min()).any(axis=None) or
+    (input_df > df[feature_cols].max()).any(axis=None)
+):
+    st.warning("⚠ Input values are outside training data range — prediction may be unreliable.")
 
-if filtered_df.empty:
-    st.warning("No matching data found. Showing full dataset.")
-    filtered_df = df.copy()
+# =========================
+# APPLY SCALING (CRITICAL FIX)
+# =========================
+def transform(X):
+    if scaler:
+        return scaler.transform(X)
+    return X
 
-filtered_df['Failure_label'] = filtered_df['Machine failure'].map({
-    0: 'No Failure',
-    1: 'Failure'
-})
+X_input = transform(input_df)
+X_all = transform(df[feature_cols])
 
 # =========================
 # MODEL PREDICTION
 # =========================
 st.subheader("🔮 Real-Time Prediction")
 
-prediction = model.predict(input_df)[0]
-prob = model.predict_proba(input_df)[0][1]
+prediction = model.predict(X_input)[0]
+prob = model.predict_proba(X_input)[0][1]
 
 col1, col2 = st.columns(2)
 
 with col1:
-    if prediction == 1:
+    if prob > 0.7:
         st.error("⚠ High Risk of Downtime")
+    elif prob > 0.3:
+        st.warning("⚠ Medium Risk")
     else:
         st.success("✅ Low Risk of Downtime")
 
@@ -154,11 +153,16 @@ with col2:
     st.metric("Current Failure Probability", f"{prob:.2%}")
 
 # =========================
-# DATA-BASED METRICS (FIXED)
+# DATA FILTER
 # =========================
+filtered_df = df.copy()
 real_failure_rate = filtered_df['Machine failure'].mean() * 100
-model_risk_avg = model.predict_proba(filtered_df[feature_cols])[:, 1].mean() * 100
 
+model_risk_avg = model.predict_proba(transform(filtered_df[feature_cols]))[:, 1].mean() * 100
+
+# =========================
+# SYSTEM INSIGHTS
+# =========================
 st.subheader("📊 System Insights")
 
 c1, c2, c3 = st.columns(3)
@@ -167,7 +171,7 @@ c2.metric("Actual Failure Rate", f"{real_failure_rate:.2f}%")
 c3.metric("Avg Model Risk", f"{model_risk_avg:.2f}%")
 
 # =========================
-# GAUGE (FIXED COMPARISON)
+# GAUGE
 # =========================
 fig_gauge = go.Figure(go.Indicator(
     mode="gauge+number+delta",
@@ -191,48 +195,29 @@ st.plotly_chart(fig_gauge, use_container_width=True)
 # DISTRIBUTION
 # =========================
 fig1 = px.histogram(
-    filtered_df,
-    x='Failure_label',
-    color='Failure_label',
-    color_discrete_map={
-        'No Failure': '#00cc96',
-        'Failure': '#ff4d4d'
-    },
+    df,
+    x='Machine failure',
+    color='Machine failure',
     title="Failure Distribution"
 )
 st.plotly_chart(fig1, use_container_width=True)
 
 # =========================
-# CORRELATION
-# =========================
-corr = filtered_df[feature_cols + ['Machine failure']].corr()
-
-fig_corr = px.imshow(
-    corr,
-    text_auto=True,
-    color_continuous_scale="viridis"
-)
-st.plotly_chart(fig_corr, use_container_width=True)
-
-# =========================
-# SHAP (ROBUST FIX)
+# SHAP
 # =========================
 st.subheader("🧠 SHAP Explainability")
 
 try:
     explainer = shap.TreeExplainer(model)
-    X_sample = df[feature_cols].sample(min(200, len(df)))
+    sample = df[feature_cols].sample(min(200, len(df)))
+    sample_transformed = transform(sample)
 
-    shap_values = explainer.shap_values(X_sample)
+    shap_values = explainer.shap_values(sample_transformed)
 
     if isinstance(shap_values, list):
         shap_vals = shap_values[1]
-    elif isinstance(shap_values, np.ndarray) and shap_values.ndim == 3:
-        shap_vals = shap_values[:, :, 1]
     else:
         shap_vals = shap_values
-
-    shap_vals = np.squeeze(shap_vals)
 
     importance = np.mean(np.abs(shap_vals), axis=0)
 
@@ -245,9 +230,7 @@ try:
         shap_df,
         x='Importance',
         y='Feature',
-        orientation='h',
-        color='Importance',
-        color_continuous_scale="viridis"
+        orientation='h'
     )
 
     st.plotly_chart(fig_shap, use_container_width=True)
@@ -261,7 +244,7 @@ except Exception as e:
 st.subheader("🧪 Sample Predictions")
 
 sample = df.sample(5)
-sample['Prediction'] = model.predict(sample[feature_cols])
+sample['Prediction'] = model.predict(transform(sample[feature_cols]))
 
 st.dataframe(sample)
 
