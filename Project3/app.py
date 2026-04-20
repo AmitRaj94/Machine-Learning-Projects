@@ -65,7 +65,7 @@ feature_cols = [
 st.title("🏭 Smart Manufacturing Downtime Risk Dashboard")
 
 # =========================
-# SIDEBAR INPUTS
+# SIDEBAR
 # =========================
 st.sidebar.header("🔧 Machine Inputs")
 
@@ -94,7 +94,7 @@ type_input = st.sidebar.selectbox("Machine Type", list(type_map.keys()))
 machine_type = type_map[type_input]
 
 selected_types = st.sidebar.multiselect(
-    "Machine Type Filter",
+    "Machine Types",
     list(type_map.keys()),
     default=list(type_map.keys())
 )
@@ -106,21 +106,8 @@ selected_failure = st.sidebar.multiselect(
     format_func=lambda x: "Failure" if x == 1 else "No Failure"
 )
 
-selected_palette = st.sidebar.selectbox(
-    "Chart Color",
-    ["blues", "viridis", "plasma", "matter"]
-)
-
-shap_sample_size = st.sidebar.slider(
-    "SHAP sample size",
-    50,
-    min(500, len(df)),
-    min(200, len(df)),
-    50
-)
-
 # =========================
-# INPUT DATA
+# INPUT FEATURES
 # =========================
 temp_diff = process_temp - air_temp
 load = torque * rpm
@@ -130,13 +117,16 @@ input_df = pd.DataFrame([[
     tool_wear, machine_type, temp_diff, load
 ]], columns=feature_cols)
 
+# =========================
+# FILTER DATA
+# =========================
 filtered_df = df[
     df['Type'].isin([type_map[t] for t in selected_types]) &
     df['Machine failure'].isin(selected_failure)
 ].copy()
 
 if filtered_df.empty:
-    st.warning("No data for selected filters. Showing full dataset.")
+    st.warning("No matching data found. Showing full dataset.")
     filtered_df = df.copy()
 
 filtered_df['Failure_label'] = filtered_df['Machine failure'].map({
@@ -145,7 +135,7 @@ filtered_df['Failure_label'] = filtered_df['Machine failure'].map({
 })
 
 # =========================
-# PREDICTION
+# MODEL PREDICTION
 # =========================
 st.subheader("🔮 Real-Time Prediction")
 
@@ -156,21 +146,35 @@ col1, col2 = st.columns(2)
 
 with col1:
     if prediction == 1:
-        st.error("⚠ High Risk")
+        st.error("⚠ High Risk of Downtime")
     else:
-        st.success("✅ Low Risk")
+        st.success("✅ Low Risk of Downtime")
 
 with col2:
-    st.metric("Failure Probability", f"{prob:.2%}")
+    st.metric("Current Failure Probability", f"{prob:.2%}")
 
 # =========================
-# GAUGE
+# DATA-BASED METRICS (FIXED)
+# =========================
+real_failure_rate = filtered_df['Machine failure'].mean() * 100
+model_risk_avg = model.predict_proba(filtered_df[feature_cols])[:, 1].mean() * 100
+
+st.subheader("📊 System Insights")
+
+c1, c2, c3 = st.columns(3)
+c1.metric("Records", len(filtered_df))
+c2.metric("Actual Failure Rate", f"{real_failure_rate:.2f}%")
+c3.metric("Avg Model Risk", f"{model_risk_avg:.2f}%")
+
+# =========================
+# GAUGE (FIXED COMPARISON)
 # =========================
 fig_gauge = go.Figure(go.Indicator(
-    mode="gauge+number",
+    mode="gauge+number+delta",
     value=prob * 100,
+    delta={'reference': model_risk_avg},
     number={'suffix': '%'},
-    title={'text': "Downtime Risk"},
+    title={'text': "Current Risk vs Dataset Average"},
     gauge={
         'axis': {'range': [0, 100]},
         'steps': [
@@ -180,21 +184,23 @@ fig_gauge = go.Figure(go.Indicator(
         ]
     }
 ))
+
 st.plotly_chart(fig_gauge, use_container_width=True)
 
 # =========================
-# INSIGHTS
+# DISTRIBUTION
 # =========================
-st.subheader("📊 Insights")
-
-st.metric("Records", len(filtered_df))
-st.metric("Failure Rate", f"{filtered_df['Machine failure'].mean()*100:.1f}%")
-
-fig1 = px.histogram(filtered_df, x='Failure_label', color='Type_label')
+fig1 = px.histogram(
+    filtered_df,
+    x='Failure_label',
+    color='Failure_label',
+    color_discrete_map={
+        'No Failure': '#00cc96',
+        'Failure': '#ff4d4d'
+    },
+    title="Failure Distribution"
+)
 st.plotly_chart(fig1, use_container_width=True)
-
-fig2 = px.box(filtered_df, x='Failure_label', y='Torque [Nm]', color='Failure_label')
-st.plotly_chart(fig2, use_container_width=True)
 
 # =========================
 # CORRELATION
@@ -204,7 +210,7 @@ corr = filtered_df[feature_cols + ['Machine failure']].corr()
 fig_corr = px.imshow(
     corr,
     text_auto=True,
-    color_continuous_scale=selected_palette
+    color_continuous_scale="viridis"
 )
 st.plotly_chart(fig_corr, use_container_width=True)
 
@@ -215,24 +221,20 @@ st.subheader("🧠 SHAP Explainability")
 
 try:
     explainer = shap.TreeExplainer(model)
-    X_sample = df[feature_cols].sample(min(shap_sample_size, len(df)))
+    X_sample = df[feature_cols].sample(min(200, len(df)))
 
     shap_values = explainer.shap_values(X_sample)
 
     if isinstance(shap_values, list):
         shap_vals = shap_values[1]
-
-    elif isinstance(shap_values, np.ndarray):
-        if shap_values.ndim == 3:
-            shap_vals = shap_values[:, :, 1]
-        else:
-            shap_vals = shap_values
+    elif isinstance(shap_values, np.ndarray) and shap_values.ndim == 3:
+        shap_vals = shap_values[:, :, 1]
     else:
-        shap_vals = np.array(shap_values)
+        shap_vals = shap_values
 
     shap_vals = np.squeeze(shap_vals)
+
     importance = np.mean(np.abs(shap_vals), axis=0)
-    importance = np.array(importance).flatten()
 
     shap_df = pd.DataFrame({
         'Feature': feature_cols,
@@ -245,8 +247,7 @@ try:
         y='Feature',
         orientation='h',
         color='Importance',
-        color_continuous_scale=selected_palette,
-        title="SHAP Feature Importance"
+        color_continuous_scale="viridis"
     )
 
     st.plotly_chart(fig_shap, use_container_width=True)
@@ -255,7 +256,7 @@ except Exception as e:
     st.warning(f"SHAP error: {e}")
 
 # =========================
-# SAMPLE
+# SAMPLE DATA
 # =========================
 st.subheader("🧪 Sample Predictions")
 
