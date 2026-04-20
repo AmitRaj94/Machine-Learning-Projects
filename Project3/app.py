@@ -16,7 +16,7 @@ st.set_page_config(page_title="Downtime Risk Dashboard", layout="wide")
 # =========================
 @st.cache_data
 def load_data():
-    df = pd.read_csv("Project3/data1")
+    df = pd.read_csv("data1.csv")
 
     # Drop unnecessary columns
     df = df.drop(columns=['TWF', 'HDF', 'PWF', 'OSF', 'RNF'], errors='ignore')
