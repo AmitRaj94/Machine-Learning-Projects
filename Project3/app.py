@@ -66,7 +66,7 @@ feature_cols = [
 # =========================
 # TITLE
 # =========================
-st.title("🏭 Smart Manufacturing Downtime Risk Dashboard")
+st.title("🏭 Smart Manufacturing Downtime Risk Pridiction Dashboard")
 
 # =========================
 # SIDEBAR INPUTS
