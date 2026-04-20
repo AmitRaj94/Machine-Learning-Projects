@@ -42,8 +42,10 @@ def load_data():
 # =========================
 @st.cache_resource
 def load_model():
-    return joblib.load("downtime_model.pkl")
-
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    model_path = os.path.join(base_dir, "downtime_model.pkl")
+    return joblib.load(model_path)
+    
 df = load_data()
 model = load_model()
 
