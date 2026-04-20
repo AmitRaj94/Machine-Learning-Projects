@@ -17,8 +17,8 @@ st.set_page_config(page_title="Downtime Risk Dashboard", layout="wide")
 # =========================
 @st.cache_data
 def load_data():
-    BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-    file_path = os.path.join(BASE_DIR, "data1.csv")
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    file_path = os.path.join(base_dir, "data1.csv")
 
     df = pd.read_csv(file_path)
 
@@ -38,8 +38,8 @@ def load_data():
 # =========================
 @st.cache_resource
 def load_model():
-    BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-    model_path = os.path.join(BASE_DIR, "downtime_model.pkl")
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    model_path = os.path.join(base_dir, "downtime_model.pkl")
     return joblib.load(model_path)
 
 df = load_data()
@@ -65,29 +65,29 @@ feature_cols = [
 st.title("🏭 Smart Manufacturing Downtime Risk Dashboard")
 
 # =========================
-# SIDEBAR
+# SIDEBAR INPUTS
 # =========================
 st.sidebar.header("🔧 Machine Inputs")
 
 air_temp = st.sidebar.slider("Air Temperature",
-                             float(df['Air temperature [K]'].min()),
-                             float(df['Air temperature [K]'].max()))
+    float(df['Air temperature [K]'].min()),
+    float(df['Air temperature [K]'].max()))
 
 process_temp = st.sidebar.slider("Process Temperature",
-                                 float(df['Process temperature [K]'].min()),
-                                 float(df['Process temperature [K]'].max()))
+    float(df['Process temperature [K]'].min()),
+    float(df['Process temperature [K]'].max()))
 
 rpm = st.sidebar.slider("Rotational Speed",
-                        int(df['Rotational speed [rpm]'].min()),
-                        int(df['Rotational speed [rpm]'].max()))
+    int(df['Rotational speed [rpm]'].min()),
+    int(df['Rotational speed [rpm]'].max()))
 
 torque = st.sidebar.slider("Torque",
-                           float(df['Torque [Nm]'].min()),
-                           float(df['Torque [Nm]'].max()))
+    float(df['Torque [Nm]'].min()),
+    float(df['Torque [Nm]'].max()))
 
 tool_wear = st.sidebar.slider("Tool Wear",
-                              int(df['Tool wear [min]'].min()),
-                              int(df['Tool wear [min]'].max()))
+    int(df['Tool wear [min]'].min()),
+    int(df['Tool wear [min]'].max()))
 
 type_map = {'L': 0, 'M': 1, 'H': 2}
 type_input = st.sidebar.selectbox("Machine Type", list(type_map.keys()))
@@ -209,7 +209,7 @@ fig_corr = px.imshow(
 st.plotly_chart(fig_corr, use_container_width=True)
 
 # =========================
-# SHAP
+# SHAP (ROBUST FIX)
 # =========================
 st.subheader("🧠 SHAP Explainability")
 
@@ -221,10 +221,18 @@ try:
 
     if isinstance(shap_values, list):
         shap_vals = shap_values[1]
-    else:
-        shap_vals = shap_values
 
+    elif isinstance(shap_values, np.ndarray):
+        if shap_values.ndim == 3:
+            shap_vals = shap_values[:, :, 1]
+        else:
+            shap_vals = shap_values
+    else:
+        shap_vals = np.array(shap_values)
+
+    shap_vals = np.squeeze(shap_vals)
     importance = np.mean(np.abs(shap_vals), axis=0)
+    importance = np.array(importance).flatten()
 
     shap_df = pd.DataFrame({
         'Feature': feature_cols,
@@ -237,7 +245,8 @@ try:
         y='Feature',
         orientation='h',
         color='Importance',
-        color_continuous_scale=selected_palette
+        color_continuous_scale=selected_palette,
+        title="SHAP Feature Importance"
     )
 
     st.plotly_chart(fig_shap, use_container_width=True)
